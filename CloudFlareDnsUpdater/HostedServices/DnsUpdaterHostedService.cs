@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CloudFlare.Client.Enumerators;
 using CloudFlare.Client.Interfaces;
+using CloudFlareDnsUpdater.Providers;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -47,7 +48,7 @@ namespace CloudFlareDnsUpdater.HostedServices
 
             foreach (var zone in zones.Result)
             {
-                var records = _cloudFlareClient.GetDnsRecordsAsync(zone.Id).Result;
+                var records = _cloudFlareClient.GetDnsRecordsAsync(zone.Id, DnsRecordType.A).Result;
                 foreach (var record in records.Result)
                 {
                     if (record.Type == DnsRecordType.A && record.Content != externalIpAddress)
@@ -74,21 +75,15 @@ namespace CloudFlareDnsUpdater.HostedServices
 
         private string GetIpAddress()
         {
-            var ipAddress = GetIPAddressFromProvider("http://ipecho.net/plain");
-
-            if (string.IsNullOrEmpty(ipAddress))
+            var ipAddress = "";
+            foreach (var provider in ExternalIpProviders.Providers)
             {
-                ipAddress = GetIPAddressFromProvider("http://icanhazip.com/");
-
-                if (string.IsNullOrEmpty(ipAddress))
+                if (!string.IsNullOrEmpty(ipAddress))
                 {
-                    ipAddress = GetIPAddressFromProvider("http://whatismyip.akamai.com");
-
-                    if (string.IsNullOrEmpty(ipAddress))
-                    {
-                        ipAddress = GetIPAddressFromProvider("https://tnx.nl/ip");
-                    }
+                    break;
                 }
+
+                ipAddress = GetIPAddressFromProvider(provider);
             }
 
             return Regex.Replace(ipAddress, @"\t|\n|\r", "");
@@ -122,9 +117,20 @@ namespace CloudFlareDnsUpdater.HostedServices
             return Task.CompletedTask;
         }
 
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _timer?.Dispose();
+            }
+        }
+
         public void Dispose()
         {
-            _timer?.Dispose();
+            // Dispose of unmanaged resources.
+            Dispose(true);
+            // Suppress finalization.
+            GC.SuppressFinalize(this);
         }
     }
 }
