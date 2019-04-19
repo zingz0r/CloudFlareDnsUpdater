@@ -36,40 +36,49 @@ namespace CloudFlareDnsUpdater.HostedServices
 
         public void UpdateDns(object state)
         {
-            var externalIpAddress = GetIpAddress();
-
-            // In case we don't have valid ip
-            if (string.IsNullOrEmpty(externalIpAddress))
+            try
             {
-                return;
-            }
+                var externalIpAddress = GetIpAddress();
 
-            var zones = _cloudFlareClient.GetZonesAsync().Result;
-
-            foreach (var zone in zones.Result)
-            {
-                var records = _cloudFlareClient.GetDnsRecordsAsync(zone.Id, DnsRecordType.A).Result;
-                foreach (var record in records.Result)
+                // In case we don't have valid ip
+                if (string.IsNullOrEmpty(externalIpAddress))
                 {
-                    if (record.Type == DnsRecordType.A && record.Content != externalIpAddress)
+                    return;
+                }
+
+                var zones = _cloudFlareClient.GetZonesAsync().Result;
+
+                foreach (var zone in zones.Result)
+                {
+                    var records = _cloudFlareClient.GetDnsRecordsAsync(zone.Id, DnsRecordType.A).Result;
+                    foreach (var record in records.Result)
                     {
-                        var updateResult = _cloudFlareClient.UpdateDnsRecordAsync(zone.Id, record.Id,
-                            DnsRecordType.A, record.Name, externalIpAddress).Result;
-
-                        if (!updateResult.Success)
+                        if (record.Type == DnsRecordType.A && record.Content != externalIpAddress)
                         {
-                            foreach (var error in updateResult.Errors)
+                            var updateResult = _cloudFlareClient.UpdateDnsRecordAsync(zone.Id, record.Id,
+                                DnsRecordType.A, record.Name, externalIpAddress).Result;
+
+                            if (!updateResult.Success)
                             {
-                                _logger.LogError($"[{DateTime.UtcNow} | Error] {{{record.Name}}} {error.Message}");
-                            }
+                                foreach (var error in updateResult.Errors)
+                                {
+                                    _logger.LogError($"[{DateTime.UtcNow} | Error] {{{record.Name}}} {error.Message}");
+                                }
 
-                        }
-                        else
-                        {
-                            _logger.LogInformation($"[{DateTime.UtcNow} | Update] {{{record.Name}}} {record.Content} -> {externalIpAddress}");
+                            }
+                            else
+                            {
+                                _logger.LogInformation(
+                                    $"[{DateTime.UtcNow} | Update] {{{record.Name}}} {record.Content} -> {externalIpAddress}");
+                            }
                         }
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation(
+                    $"[{DateTime.UtcNow} | Error] {{Exception:}} {ex}");
             }
         }
 
