@@ -1,7 +1,6 @@
 ﻿using System.Threading.Tasks;
 using CloudFlare.Client;
-using CloudFlare.Client.Api.Authentication;
-using CloudFlare.Client.Interfaces;
+using CloudFlare.Client.Models;
 using CloudFlareDnsUpdater.HostedServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,7 +26,7 @@ namespace CloudFlareDnsUpdater
                 })
                 .ConfigureServices((hostContext, services) =>
                 {
-                    var cloudFlareConfig = hostContext.Configuration.GetSection("CloudFlare").Get<CloudFlareAuthentication>();
+                    var cloudFlareConfig = hostContext.Configuration.GetSection("CloudFlare").Get<Authentication>();
                     services.AddSingleton<ICloudFlareClient, CloudFlareClient>(s => new CloudFlareClient(cloudFlareConfig.Email, cloudFlareConfig.ApiKey));
 
                     services.AddHostedService<DnsUpdaterHostedService>();
