@@ -1,0 +1,9 @@
+version: '3.4'
+
+services:
+  cloudflarednsupdater:
+    image: ${DOCKER_REGISTRY-}cloudflarednsupdater
+    container_name: ${DOCKER_REGISTRY-}cloudflarednsupdater
+    build:
+      context: .
+      dockerfile: CloudFlareDnsUpdater/Dockerfile
