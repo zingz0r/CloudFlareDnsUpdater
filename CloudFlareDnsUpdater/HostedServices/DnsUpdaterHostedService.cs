@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CloudFlare.Client;
 using CloudFlare.Client.Enumerators;
+using CloudFlare.Client.Models;
 using CloudFlareDnsUpdater.Providers;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -14,13 +15,13 @@ namespace CloudFlareDnsUpdater.HostedServices
     internal class DnsUpdaterHostedService : IHostedService, IDisposable
     {
         private readonly ILogger _logger;
-        private readonly ICloudFlareClient _cloudFlareClient;
+        private readonly Authentication _auth;
         private Timer _timer;
 
-        public DnsUpdaterHostedService(ILogger<DnsUpdaterHostedService> logger, ICloudFlareClient cloudFlareClient)
+        public DnsUpdaterHostedService(ILogger<DnsUpdaterHostedService> logger, Authentication auth)
         {
             _logger = logger;
-            _cloudFlareClient = cloudFlareClient;
+            _auth = auth;
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
@@ -38,38 +39,43 @@ namespace CloudFlareDnsUpdater.HostedServices
         {
             try
             {
-                var externalIpAddress = GetIpAddress();
-
-                // In case we don't have valid ip
-                if (string.IsNullOrEmpty(externalIpAddress))
+                using (var client = new CloudFlareClient(_auth))
                 {
-                    return;
-                }
-
-                var zones = _cloudFlareClient.GetZonesAsync().Result;
-
-                foreach (var zone in zones.Result)
-                {
-                    var records = _cloudFlareClient.GetDnsRecordsAsync(zone.Id, DnsRecordType.A).Result;
-                    foreach (var record in records.Result)
+                    var externalIpAddress = GetIpAddress();
+                    
+                    // In case we don't have valid ip
+                    if (string.IsNullOrEmpty(externalIpAddress))
                     {
-                        if (record.Type == DnsRecordType.A && record.Content != externalIpAddress)
+                        _logger.LogError($"[{DateTime.UtcNow} | Error] External IP is null.");
+
+                        return;
+                    }
+
+                    var zones = client.GetZonesAsync().Result;
+
+                    foreach (var zone in zones.Result)
+                    {
+                        var records = client.GetDnsRecordsAsync(zone.Id, DnsRecordType.A).Result;
+                        foreach (var record in records.Result)
                         {
-                            var updateResult = _cloudFlareClient.UpdateDnsRecordAsync(zone.Id, record.Id,
-                                DnsRecordType.A, record.Name, externalIpAddress).Result;
-
-                            if (!updateResult.Success)
+                            if (record.Type == DnsRecordType.A && record.Content != externalIpAddress)
                             {
-                                foreach (var error in updateResult.Errors)
+                                var updateResult = client.UpdateDnsRecordAsync(zone.Id, record.Id,
+                                    DnsRecordType.A, record.Name, externalIpAddress).Result;
+
+                                if (!updateResult.Success)
                                 {
-                                    _logger.LogError($"[{DateTime.UtcNow} | Error] {{{record.Name}}} {error.Message}");
-                                }
+                                    foreach (var error in updateResult.Errors)
+                                    {
+                                        _logger.LogError($"[{DateTime.UtcNow} | Error] {{{record.Name}}} {error.Message}");
+                                    }
 
-                            }
-                            else
-                            {
-                                _logger.LogInformation(
-                                    $"[{DateTime.UtcNow} | Update] {{{record.Name}}} {record.Content} -> {externalIpAddress}");
+                                }
+                                else
+                                {
+                                    _logger.LogInformation(
+                                        $"[{DateTime.UtcNow} | Update] {{{record.Name}}} {record.Content} -> {externalIpAddress}");
+                                }
                             }
                         }
                     }
@@ -78,7 +84,7 @@ namespace CloudFlareDnsUpdater.HostedServices
             catch (Exception ex)
             {
                 _logger.LogInformation(
-                    $"[{DateTime.UtcNow} | Error] {{Exception:}} {ex}");
+                    $"[{DateTime.UtcNow} | Error] No internet connection.");
             }
         }
 
@@ -100,22 +106,15 @@ namespace CloudFlareDnsUpdater.HostedServices
 
         private string GetIPAddressFromProvider(string providerUrl)
         {
-            try
+            using (var client = new HttpClient())
             {
-                using (var client = new HttpClient())
+                var response = client.GetAsync(providerUrl).Result;
+                if (response.IsSuccessStatusCode)
                 {
-                    var response = client.GetAsync(providerUrl).Result;
-                    if (response.IsSuccessStatusCode)
-                    {
-                        return response.Content.ReadAsStringAsync().Result;
-                    }
+                    return response.Content.ReadAsStringAsync().Result;
                 }
             }
-            catch (Exception)
-            {
-                // if we have no internet connection
-                return "";
-            }
+
             return "";
         }
 

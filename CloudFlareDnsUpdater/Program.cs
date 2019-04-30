@@ -26,8 +26,7 @@ namespace CloudFlareDnsUpdater
                 })
                 .ConfigureServices((hostContext, services) =>
                 {
-                    var cloudFlareConfig = hostContext.Configuration.GetSection("CloudFlare").Get<Authentication>();
-                    services.AddSingleton<ICloudFlareClient, CloudFlareClient>(s => new CloudFlareClient(cloudFlareConfig.Email, cloudFlareConfig.ApiKey));
+                    services.AddTransient(s => hostContext.Configuration.GetSection("CloudFlare").Get<Authentication>());
 
                     services.AddHostedService<DnsUpdaterHostedService>();
                 })
