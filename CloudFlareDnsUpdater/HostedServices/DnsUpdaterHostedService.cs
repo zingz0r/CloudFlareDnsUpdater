@@ -83,8 +83,7 @@ namespace CloudFlareDnsUpdater.HostedServices
             }
             catch (Exception ex)
             {
-                _logger.LogInformation(
-                    $"[{DateTime.UtcNow} | Error] No internet connection.");
+                _logger.LogError(ex.Message);
             }
         }
 
