@@ -10,7 +10,7 @@ using CloudFlare.Client.Models;
 using CloudFlareDnsUpdater.Providers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace CloudFlareDnsUpdater.HostedServices
 {
@@ -19,22 +19,26 @@ namespace CloudFlareDnsUpdater.HostedServices
         private readonly HttpClient _httpClient;
         private readonly ILogger _logger;
         private readonly IAuthentication _authentication;
+        private readonly TimeSpan _updateInterval;
 
-        public DnsUpdaterHostedService(HttpClient httpClient, ILogger<DnsUpdaterHostedService> logger, IConfiguration config)
+        public DnsUpdaterHostedService(HttpClient httpClient, ILogger logger, IConfiguration config)
         {
             _httpClient = httpClient;
-            _logger = logger;
+            _logger = logger.ForContext<DnsUpdaterHostedService>();
             _authentication = new ApiKeyAuthentication(config.GetValue<string>("CloudFlare.Email"), config.GetValue<string>("CloudFlare.ApiKey"));
+            _updateInterval = TimeSpan.FromSeconds(config.GetValue("UpdateIntervalSeconds", 30));
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
         {
-            _logger.LogInformation($"[{DateTime.UtcNow} | Info] Started DNS updater...");
+            _logger.Information($"Started DNS updater...");
 
             while(!cancellationToken.IsCancellationRequested)
             {
                 await UpdateDnsAsync(cancellationToken);
-                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+                _logger.Debug("Finished update process. Waiting '{@updateInterval}' for next check", _updateInterval);
+
+                await Task.Delay(_updateInterval, cancellationToken);
             }
         }
 
@@ -45,19 +49,22 @@ namespace CloudFlareDnsUpdater.HostedServices
                 using (var client = new CloudFlareClient(_authentication))
                 {
                     var externalIpAddress = await GetIpAddressAsync(cancellationToken);
-                    
+                    _logger.Debug("Got ip from external provider: {ip}", externalIpAddress.ToString());
+
                     if (externalIpAddress == null)
                     {
-                        _logger.LogError($"[{DateTime.UtcNow} | Error] External IP is null.");
-
+                        _logger.Error($"All external IP providers failed to resolve the ip");
                         return;
                     }
 
                     var zones = (await client.GetZonesAsync(cancellationToken)).Result;
+                    _logger.Debug("Found the following zones : {@zones}", zones);
 
                     foreach (var zone in zones)
                     {
                         var records = (await client.GetDnsRecordsAsync(zone.Id, DnsRecordType.A, cancellationToken)).Result;
+                        _logger.Debug("Found the following 'A' records are in '{zone}': {@records}", zone.Name, records);
+
                         foreach (var record in records)
                         {
                             if (record.Type == DnsRecordType.A && record.Content != externalIpAddress.ToString())
@@ -67,16 +74,17 @@ namespace CloudFlareDnsUpdater.HostedServices
 
                                 if (!updateResult.Success)
                                 {
-                                    foreach (var error in updateResult.Errors)
-                                    {
-                                        _logger.LogError($"[{DateTime.UtcNow} | Error] {{{record.Name}}} {error.Message}");
-                                    }
+                                    _logger.Error("The following errors happened during update of '{record}' in zone '{zone}': {@error}", record.Name, zone.Name, updateResult.Errors);
                                 }
                                 else
                                 {
-                                    _logger.LogInformation(
-                                        $"[{DateTime.UtcNow} | Update] {{{record.Name}}} {record.Content} -> {externalIpAddress}");
+                                    _logger.Information("Successfully updated '{record}' ip from '{previousIp}' to '{externalIpAddress}' in zone '{zone}'",
+                                        record.Name, record.Content, externalIpAddress.ToString(), zone.Name);
                                 }
+                            }
+                            else
+                            {
+                                _logger.Debug("The IP for '{record}' in zone '{zone}' is already '{externalIpAddress}'", record.Name, zone.Name, externalIpAddress.ToString());
                             }
                         }
                     }
@@ -84,7 +92,7 @@ namespace CloudFlareDnsUpdater.HostedServices
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex.Message);
+                _logger.Error(ex.Message);
             }
         }
 
