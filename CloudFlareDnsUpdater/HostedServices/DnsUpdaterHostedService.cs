@@ -25,7 +25,12 @@ namespace CloudFlareDnsUpdater.HostedServices
         {
             _httpClient = httpClient;
             _logger = logger.ForContext<DnsUpdaterHostedService>();
-            _authentication = new ApiKeyAuthentication(config.GetValue<string>("CloudFlare.Email"), config.GetValue<string>("CloudFlare.ApiKey"));
+
+            var token = config.GetValue<string>("CloudFlare:ApiToken");
+            var email = config.GetValue<string>("CloudFlare:Email");
+            var key = config.GetValue<string>("CloudFlare:ApiKey");
+
+            _authentication = !string.IsNullOrEmpty(token) ? new ApiTokenAuthentication(token) : new ApiKeyAuthentication(email, key);
             _updateInterval = TimeSpan.FromSeconds(config.GetValue("UpdateIntervalSeconds", 30));
         }
 
