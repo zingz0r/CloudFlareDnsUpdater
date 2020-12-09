@@ -7,3 +7,9 @@ services:
     build:
       context: .
       dockerfile: CloudFlareDnsUpdater/Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - CloudFlare__Email=email@example.com
+      - CloudFlare__ApiKey=key
+    restart: unless-stopped
+
