@@ -68,7 +68,7 @@ namespace CloudFlareDnsUpdater.HostedServices
                     foreach (var zone in zones)
                     {
                         var records = (await client.GetDnsRecordsAsync(zone.Id, DnsRecordType.A, cancellationToken)).Result;
-                        _logger.Debug("Found the following 'A' records are in '{zone}': {@records}", zone.Name, records);
+                        _logger.Debug("Found the following 'A' records in zone '{zone}': {@records}", zone.Name, records);
 
                         foreach (var record in records)
                         {
@@ -79,17 +79,17 @@ namespace CloudFlareDnsUpdater.HostedServices
 
                                 if (!updateResult.Success)
                                 {
-                                    _logger.Error("The following errors happened during update of '{record}' in zone '{zone}': {@error}", record.Name, zone.Name, updateResult.Errors);
+                                    _logger.Error("The following errors happened during update of record '{record}' in zone '{zone}': {@error}", record.Name, zone.Name, updateResult.Errors);
                                 }
                                 else
                                 {
-                                    _logger.Information("Successfully updated '{record}' ip from '{previousIp}' to '{externalIpAddress}' in zone '{zone}'",
+                                    _logger.Information("Successfully updated record '{record}' ip from '{previousIp}' to '{externalIpAddress}' in zone '{zone}'",
                                         record.Name, record.Content, externalIpAddress.ToString(), zone.Name);
                                 }
                             }
                             else
                             {
-                                _logger.Debug("The IP for '{record}' in zone '{zone}' is already '{externalIpAddress}'", record.Name, zone.Name, externalIpAddress.ToString());
+                                _logger.Debug("The IP for record '{record}' in zone '{zone}' is already '{externalIpAddress}'", record.Name, zone.Name, externalIpAddress.ToString());
                             }
                         }
                     }
