@@ -1,7 +1,7 @@
-FROM microsoft/dotnet:2.2-runtime AS base
+FROM mcr.microsoft.com/dotnet/runtime:5.0 AS base
 WORKDIR /app
 
-FROM microsoft/dotnet:2.2-sdk AS build
+FROM mcr.microsoft.com/dotnet/sdk:5.0 AS build
 WORKDIR /src
 COPY CloudFlareDnsUpdater/CloudFlareDnsUpdater.csproj CloudFlareDnsUpdater/
 RUN dotnet restore CloudFlareDnsUpdater/CloudFlareDnsUpdater.csproj
