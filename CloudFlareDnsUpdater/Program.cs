@@ -1,6 +1,5 @@
-﻿using System.Threading.Tasks;
-using CloudFlare.Client;
-using CloudFlare.Client.Models;
+﻿using System;
+using System.Threading.Tasks;
 using CloudFlareDnsUpdater.HostedServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,8 +25,7 @@ namespace CloudFlareDnsUpdater
                 })
                 .ConfigureServices((hostContext, services) =>
                 {
-                    services.AddTransient(s => hostContext.Configuration.GetSection("CloudFlare").Get<Authentication>());
-
+                    services.AddHttpClient<DnsUpdaterHostedService>().SetHandlerLifetime(TimeSpan.FromSeconds(5));
                     services.AddHostedService<DnsUpdaterHostedService>();
                 })
                 .ConfigureLogging((hostingContext, logging) => {

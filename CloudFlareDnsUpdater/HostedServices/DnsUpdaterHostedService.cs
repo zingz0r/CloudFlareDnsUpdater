@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -7,61 +8,62 @@ using CloudFlare.Client;
 using CloudFlare.Client.Enumerators;
 using CloudFlare.Client.Models;
 using CloudFlareDnsUpdater.Providers;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace CloudFlareDnsUpdater.HostedServices
 {
-    internal class DnsUpdaterHostedService : IHostedService, IDisposable
+    internal class DnsUpdaterHostedService : IHostedService
     {
+        private readonly HttpClient _httpClient;
         private readonly ILogger _logger;
-        private readonly Authentication _auth;
-        private Timer _timer;
+        private readonly IAuthentication _authentication;
 
-        public DnsUpdaterHostedService(ILogger<DnsUpdaterHostedService> logger, Authentication auth)
+        public DnsUpdaterHostedService(HttpClient httpClient, ILogger<DnsUpdaterHostedService> logger, IConfiguration config)
         {
+            _httpClient = httpClient;
             _logger = logger;
-            _auth = auth;
+            _authentication = new ApiKeyAuthentication(config.GetValue<string>("CloudFlare.Email"), config.GetValue<string>("CloudFlare.ApiKey"));
         }
 
-        public Task StartAsync(CancellationToken cancellationToken)
+        public async Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation($"[{DateTime.UtcNow} | Info] Started DNS updater...");
 
-
-            _timer = new Timer(UpdateDns, null, TimeSpan.Zero,
-                TimeSpan.FromSeconds(30));
-
-            return Task.CompletedTask;
+            while(!cancellationToken.IsCancellationRequested)
+            {
+                await UpdateDnsAsync(cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            }
         }
 
-        public void UpdateDns(object state)
+        public async Task UpdateDnsAsync(CancellationToken cancellationToken)
         {
             try
             {
-                using (var client = new CloudFlareClient(_auth))
+                using (var client = new CloudFlareClient(_authentication))
                 {
-                    var externalIpAddress = GetIpAddress();
+                    var externalIpAddress = await GetIpAddressAsync(cancellationToken);
                     
-                    // In case we don't have valid ip
-                    if (string.IsNullOrEmpty(externalIpAddress))
+                    if (externalIpAddress == null)
                     {
                         _logger.LogError($"[{DateTime.UtcNow} | Error] External IP is null.");
 
                         return;
                     }
 
-                    var zones = client.GetZonesAsync().Result;
+                    var zones = (await client.GetZonesAsync(cancellationToken)).Result;
 
-                    foreach (var zone in zones.Result)
+                    foreach (var zone in zones)
                     {
-                        var records = client.GetDnsRecordsAsync(zone.Id, DnsRecordType.A).Result;
-                        foreach (var record in records.Result)
+                        var records = (await client.GetDnsRecordsAsync(zone.Id, DnsRecordType.A, cancellationToken)).Result;
+                        foreach (var record in records)
                         {
-                            if (record.Type == DnsRecordType.A && record.Content != externalIpAddress)
+                            if (record.Type == DnsRecordType.A && record.Content != externalIpAddress.ToString())
                             {
-                                var updateResult = client.UpdateDnsRecordAsync(zone.Id, record.Id,
-                                    DnsRecordType.A, record.Name, externalIpAddress).Result;
+                                var updateResult = (await client.UpdateDnsRecordAsync(zone.Id, record.Id,
+                                    DnsRecordType.A, record.Name, externalIpAddress.ToString(), cancellationToken));
 
                                 if (!updateResult.Success)
                                 {
@@ -69,7 +71,6 @@ namespace CloudFlareDnsUpdater.HostedServices
                                     {
                                         _logger.LogError($"[{DateTime.UtcNow} | Error] {{{record.Name}}} {error.Message}");
                                     }
-
                                 }
                                 else
                                 {
@@ -87,57 +88,31 @@ namespace CloudFlareDnsUpdater.HostedServices
             }
         }
 
-        private string GetIpAddress()
+        private async Task<IPAddress> GetIpAddressAsync(CancellationToken cancellationToken)
         {
-            var ipAddress = "";
+            IPAddress ipAddress = null;
             foreach (var provider in ExternalIpProviders.Providers)
             {
-                if (!string.IsNullOrEmpty(ipAddress))
+                if (ipAddress != null)
                 {
                     break;
                 }
-
-                ipAddress = GetIPAddressFromProvider(provider);
-            }
-
-            return Regex.Replace(ipAddress, @"\t|\n|\r", "");
-        }
-
-        private string GetIPAddressFromProvider(string providerUrl)
-        {
-            using (var client = new HttpClient())
-            {
-                var response = client.GetAsync(providerUrl).Result;
+                               
+                var response = await _httpClient.GetAsync(provider, cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
-                    return response.Content.ReadAsStringAsync().Result;
+                    var ip = await response.Content.ReadAsStringAsync(cancellationToken);
+                    Regex.Replace(ip, @"\t|\n|\r", "");
+                    ipAddress = IPAddress.Parse(ip);
                 }
             }
 
-            return "";
+            return ipAddress;
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
-            _timer?.Change(Timeout.Infinite, 0);
-
             return Task.CompletedTask;
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                _timer?.Dispose();
-            }
-        }
-
-        public void Dispose()
-        {
-            // Dispose of unmanaged resources.
-            Dispose(true);
-            // Suppress finalization.
-            GC.SuppressFinalize(this);
         }
     }
 }
