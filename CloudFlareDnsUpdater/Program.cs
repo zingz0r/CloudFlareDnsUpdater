@@ -1,15 +1,14 @@
-﻿using System;
-using System.Net.Http;
-using System.Threading.Tasks;
-using Autofac;
+﻿using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using CloudFlareDnsUpdater.HostedServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Context;
+using System;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace CloudFlareDnsUpdater
 {
@@ -20,10 +19,10 @@ namespace CloudFlareDnsUpdater
             LogContext.PushProperty("SourceContext", "Main");
 
             var builder = new HostBuilder()
-                .UseServiceProviderFactory(context => new AutofacServiceProviderFactory())
-                .ConfigureAppConfiguration((hostingContext, config) =>
+                .UseServiceProviderFactory(_ => new AutofacServiceProviderFactory())
+                .ConfigureAppConfiguration((_, config) =>
                 {
-                    config.AddJsonFile("appsettings.json", optional: true);
+                    config.AddJsonFile("appsettings.json", true);
                     config.AddEnvironmentVariables();
 
                     if (args != null)
@@ -31,12 +30,14 @@ namespace CloudFlareDnsUpdater
                         config.AddCommandLine(args);
                     }
                 })
-                .ConfigureServices((hostingContext, services) => {
+                .ConfigureServices((_, services) =>
+                {
                     services.AddHttpClient<DnsUpdaterHostedService>().SetHandlerLifetime(TimeSpan.FromSeconds(5));
                 })
-                .ConfigureContainer<ContainerBuilder>((hostingContext, builder) => {
-                    builder.RegisterType<DnsUpdaterHostedService>().As<IHostedService>().SingleInstance();
-                    builder.Register(c => c.Resolve<IHttpClientFactory>().CreateClient()).As<HttpClient>();
+                .ConfigureContainer<ContainerBuilder>((_, containerBuilder) =>
+                {
+                    containerBuilder.RegisterType<DnsUpdaterHostedService>().As<IHostedService>().SingleInstance();
+                    containerBuilder.Register(c => c.Resolve<IHttpClientFactory>().CreateClient()).As<HttpClient>();
                 })
                 .UseSerilog((hostingContext, loggerConfiguration) => loggerConfiguration
                         .ReadFrom.Configuration(hostingContext.Configuration));

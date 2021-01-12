@@ -1,16 +1,18 @@
-﻿using System;
-using System.Net;
-using System.Net.Http;
-using System.Text.RegularExpressions;
-using System.Threading;
-using System.Threading.Tasks;
-using CloudFlare.Client;
+﻿using CloudFlare.Client;
+using CloudFlare.Client.Api.Parameters;
 using CloudFlare.Client.Enumerators;
+using CloudFlare.Client.Interfaces;
 using CloudFlare.Client.Models;
 using CloudFlareDnsUpdater.Providers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Serilog;
+using System;
+using System.Net;
+using System.Net.Http;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CloudFlareDnsUpdater.HostedServices
 {
@@ -38,7 +40,7 @@ namespace CloudFlareDnsUpdater.HostedServices
         {
             _logger.Information($"Started DNS updater...");
 
-            while(!cancellationToken.IsCancellationRequested)
+            while (!cancellationToken.IsCancellationRequested)
             {
                 await UpdateDnsAsync(cancellationToken);
                 _logger.Debug("Finished update process. Waiting '{@updateInterval}' for next check", _updateInterval);
@@ -51,46 +53,44 @@ namespace CloudFlareDnsUpdater.HostedServices
         {
             try
             {
-                using (var client = new CloudFlareClient(_authentication))
+                using var client = new CloudFlareClient(_authentication);
+                var externalIpAddress = await GetIpAddressAsync(cancellationToken);
+                _logger.Debug("Got ip from external provider: {ip}", externalIpAddress.ToString());
+
+                if (externalIpAddress == null)
                 {
-                    var externalIpAddress = await GetIpAddressAsync(cancellationToken);
-                    _logger.Debug("Got ip from external provider: {ip}", externalIpAddress.ToString());
+                    _logger.Error($"All external IP providers failed to resolve the ip");
+                    return;
+                }
 
-                    if (externalIpAddress == null)
+                var zones = (await client.Zones.GetAsync(cancellationToken: cancellationToken)).Result;
+                _logger.Debug("Found the following zones : {@zones}", zones);
+
+                foreach (var zone in zones)
+                {
+                    var records = (await client.Zones.DnsRecords.GetAsync(zone.Id, new DnsRecordFilter { Type = DnsRecordType.A }, null, cancellationToken)).Result;
+                    _logger.Debug("Found the following 'A' records in zone '{zone}': {@records}", zone.Name, records);
+
+                    foreach (var record in records)
                     {
-                        _logger.Error($"All external IP providers failed to resolve the ip");
-                        return;
-                    }
-
-                    var zones = (await client.GetZonesAsync(cancellationToken)).Result;
-                    _logger.Debug("Found the following zones : {@zones}", zones);
-
-                    foreach (var zone in zones)
-                    {
-                        var records = (await client.GetDnsRecordsAsync(zone.Id, DnsRecordType.A, cancellationToken)).Result;
-                        _logger.Debug("Found the following 'A' records in zone '{zone}': {@records}", zone.Name, records);
-
-                        foreach (var record in records)
+                        if (record.Type == DnsRecordType.A && record.Content != externalIpAddress.ToString())
                         {
-                            if (record.Type == DnsRecordType.A && record.Content != externalIpAddress.ToString())
-                            {
-                                var updateResult = (await client.UpdateDnsRecordAsync(zone.Id, record.Id,
-                                    DnsRecordType.A, record.Name, externalIpAddress.ToString(), cancellationToken));
+                            var updateResult = (await client.Zones.DnsRecords.UpdateAsync(zone.Id, record.Id,
+                                DnsRecordType.A, record.Name, externalIpAddress.ToString(), null, cancellationToken));
 
-                                if (!updateResult.Success)
-                                {
-                                    _logger.Error("The following errors happened during update of record '{record}' in zone '{zone}': {@error}", record.Name, zone.Name, updateResult.Errors);
-                                }
-                                else
-                                {
-                                    _logger.Information("Successfully updated record '{record}' ip from '{previousIp}' to '{externalIpAddress}' in zone '{zone}'",
-                                        record.Name, record.Content, externalIpAddress.ToString(), zone.Name);
-                                }
+                            if (!updateResult.Success)
+                            {
+                                _logger.Error("The following errors happened during update of record '{record}' in zone '{zone}': {@error}", record.Name, zone.Name, updateResult.Errors);
                             }
                             else
                             {
-                                _logger.Debug("The IP for record '{record}' in zone '{zone}' is already '{externalIpAddress}'", record.Name, zone.Name, externalIpAddress.ToString());
+                                _logger.Information("Successfully updated record '{record}' ip from '{previousIp}' to '{externalIpAddress}' in zone '{zone}'",
+                                    record.Name, record.Content, externalIpAddress.ToString(), zone.Name);
                             }
+                        }
+                        else
+                        {
+                            _logger.Debug("The IP for record '{record}' in zone '{zone}' is already '{externalIpAddress}'", record.Name, zone.Name, externalIpAddress.ToString());
                         }
                     }
                 }
@@ -110,7 +110,7 @@ namespace CloudFlareDnsUpdater.HostedServices
                 {
                     break;
                 }
-                               
+
                 var response = await _httpClient.GetAsync(provider, cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
