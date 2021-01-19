@@ -1,8 +1,7 @@
 ﻿using CloudFlare.Client;
-using CloudFlare.Client.Api.Parameters;
+using CloudFlare.Client.Api.Authentication;
+using CloudFlare.Client.Api.Zones.DnsRecord;
 using CloudFlare.Client.Enumerators;
-using CloudFlare.Client.Interfaces;
-using CloudFlare.Client.Models;
 using CloudFlareDnsUpdater.Providers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -75,8 +74,13 @@ namespace CloudFlareDnsUpdater.HostedServices
                     {
                         if (record.Type == DnsRecordType.A && record.Content != externalIpAddress.ToString())
                         {
-                            var updateResult = (await client.Zones.DnsRecords.UpdateAsync(zone.Id, record.Id,
-                                DnsRecordType.A, record.Name, externalIpAddress.ToString(), null, cancellationToken));
+                            var modified = new ModifiedDnsRecord
+                            {
+                                Type = DnsRecordType.A,
+                                Name = record.Name,
+                                Content = externalIpAddress.ToString(),
+                            };
+                            var updateResult = (await client.Zones.DnsRecords.UpdateAsync(zone.Id, record.Id, modified, cancellationToken));
 
                             if (!updateResult.Success)
                             {
