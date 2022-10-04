@@ -10,9 +10,9 @@ namespace CloudFlareDnsUpdater.Providers
         {
             Providers = new List<string>
             {
-                "http://ipecho.net/plain",
-                "http://icanhazip.com/",
-                "http://whatismyip.akamai.com",
+                "https://ipecho.net/plain",
+                "https://icanhazip.com/",
+                "https://whatismyip.akamai.com",
                 "https://tnx.nl/ip"
             };
         }

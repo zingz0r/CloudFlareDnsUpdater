@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -31,18 +32,20 @@ namespace CloudFlareDnsUpdater.HostedServices
             var email = config.GetValue<string>("CloudFlare:Email");
             var key = config.GetValue<string>("CloudFlare:ApiKey");
 
-            _authentication = !string.IsNullOrEmpty(token) ? new ApiTokenAuthentication(token) : new ApiKeyAuthentication(email, key);
+            _authentication = !string.IsNullOrEmpty(token)
+                ? new ApiTokenAuthentication(token)
+                : new ApiKeyAuthentication(email, key);
             _updateInterval = TimeSpan.FromSeconds(config.GetValue("UpdateIntervalSeconds", 30));
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
         {
-            _logger.Information($"Started DNS updater...");
+            _logger.Information("Started DNS updater...");
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 await UpdateDnsAsync(cancellationToken);
-                _logger.Debug("Finished update process. Waiting '{@updateInterval}' for next check", _updateInterval);
+                _logger.Debug("Finished update process. Waiting '{@UpdateInterval}' for next check", _updateInterval);
 
                 await Task.Delay(_updateInterval, cancellationToken);
             }
@@ -54,21 +57,22 @@ namespace CloudFlareDnsUpdater.HostedServices
             {
                 using var client = new CloudFlareClient(_authentication);
                 var externalIpAddress = await GetIpAddressAsync(cancellationToken);
-                _logger.Debug("Got ip from external provider: {ip}", externalIpAddress.ToString());
+                _logger.Debug("Got ip from external provider: {IP}", externalIpAddress?.ToString());
 
                 if (externalIpAddress == null)
                 {
-                    _logger.Error($"All external IP providers failed to resolve the ip");
+                    _logger.Error("All external IP providers failed to resolve the IP");
                     return;
                 }
 
                 var zones = (await client.Zones.GetAsync(cancellationToken: cancellationToken)).Result;
-                _logger.Debug("Found the following zones : {@zones}", zones);
+                _logger.Debug("Found the following zones : {@Zones}", zones.Select(x => x.Name));
 
                 foreach (var zone in zones)
                 {
-                    var records = (await client.Zones.DnsRecords.GetAsync(zone.Id, new DnsRecordFilter { Type = DnsRecordType.A }, null, cancellationToken)).Result;
-                    _logger.Debug("Found the following 'A' records in zone '{zone}': {@records}", zone.Name, records);
+                    var records = (await client.Zones.DnsRecords.GetAsync(zone.Id,
+                        new DnsRecordFilter {Type = DnsRecordType.A}, null, cancellationToken)).Result;
+                    _logger.Debug("Found the following 'A' records in zone '{Zone}': {@Records}", zone.Name, records.Select(x => x.Name));
 
                     foreach (var record in records)
                     {
@@ -80,28 +84,35 @@ namespace CloudFlareDnsUpdater.HostedServices
                                 Name = record.Name,
                                 Content = externalIpAddress.ToString(),
                             };
-                            var updateResult = (await client.Zones.DnsRecords.UpdateAsync(zone.Id, record.Id, modified, cancellationToken));
+                            var updateResult =
+                                (await client.Zones.DnsRecords.UpdateAsync(zone.Id, record.Id, modified,
+                                    cancellationToken));
 
                             if (!updateResult.Success)
                             {
-                                _logger.Error("The following errors happened during update of record '{record}' in zone '{zone}': {@error}", record.Name, zone.Name, updateResult.Errors);
+                                _logger.Error(
+                                    "The following errors happened during update of record '{Record}' in zone '{Zone}': {@Error}",
+                                    record.Name, zone.Name, updateResult.Errors);
                             }
                             else
                             {
-                                _logger.Information("Successfully updated record '{record}' ip from '{previousIp}' to '{externalIpAddress}' in zone '{zone}'",
+                                _logger.Information(
+                                    "Successfully updated record '{Record}' ip from '{PreviousIp}' to '{ExternalIpAddress}' in zone '{Zone}'",
                                     record.Name, record.Content, externalIpAddress.ToString(), zone.Name);
                             }
                         }
                         else
                         {
-                            _logger.Debug("The IP for record '{record}' in zone '{zone}' is already '{externalIpAddress}'", record.Name, zone.Name, externalIpAddress.ToString());
+                            _logger.Debug(
+                                "The IP for record '{Record}' in zone '{Zone}' is already '{ExternalIpAddress}'",
+                                record.Name, zone.Name, externalIpAddress.ToString());
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.Error(ex.Message);
+                _logger.Error(ex, "Unexpected exception happened");
             }
         }
 
@@ -116,12 +127,14 @@ namespace CloudFlareDnsUpdater.HostedServices
                 }
 
                 var response = await _httpClient.GetAsync(provider, cancellationToken);
-                if (response.IsSuccessStatusCode)
+                if (!response.IsSuccessStatusCode)
                 {
-                    var ip = await response.Content.ReadAsStringAsync(cancellationToken);
-                    Regex.Replace(ip, @"\t|\n|\r", "");
-                    ipAddress = IPAddress.Parse(ip);
+                    continue;
                 }
+
+                var ip = await response.Content.ReadAsStringAsync(cancellationToken);
+                Regex.Replace(ip, @"\t|\n|\r", string.Empty);
+                ipAddress = IPAddress.Parse(ip);
             }
 
             return ipAddress;
